@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanban Board</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .kanban-column {
+            min-width: 280px;
+            max-width: 320px;
+            background-color: #2d3748; /* Darker column background */
+            border-radius: 0.75rem; /* rounded-xl */
+            padding: 1rem;
+            margin: 0.75rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+        }
+        .kanban-column.drag-over {
+            background-color: #4a5568; /* Highlight on drag over */
+        }
+        .task-card {
+            background-color: #4a5568; /* Card background */
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.075);
+            cursor: grab;
+            display: flex;
+            flex-direction: column; /* Changed to column to stack text and duration */
+            justify-content: space-between;
+            align-items: flex-start; /* Align items to start for stacked content */
+            transition: background-color 0.2s ease-in-out;
+            word-break: break-word; /* Ensure long words wrap */
+            position: relative; /* For positioning delete button */
+        }
+        .task-card:hover {
+            background-color: #636b7a;
+        }
+        .task-card.dragging {
+            opacity: 0.5;
+            border: 2px dashed #a0aec0;
+        }
+        .delete-button {
+            background: none;
+            border: none;
+            color: #cbd5e0;
+            cursor: pointer;
+            font-size: 1.1rem;
+            position: absolute; /* Position delete button absolutely */
+            top: 0.5rem;
+            right: 0.5rem;
+            transition: color 0.2s ease-in-out;
+        }
+        .delete-button:hover {
+            color: #e53e3e;
+        }
+        #fireworks-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+        }
+        .add-task-input {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid #4a5568;
+            background-color: #2d3748;
+            color: #e2e8f0;
+            margin-bottom: 1rem;
+            outline: none;
+        }
+        .add-task-input::placeholder {
+            color: #a0aec0;
+        }
+        .add-task-input:focus {
+            border-color: #63b3ed;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.5);
+        }
+        .clear-all-button {
+            background-color: #e53e3e;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        .clear-all-button:hover {
+            background-color: #c53030;
+        }
+        .task-content-wrapper {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            padding-right: 2rem; /* Make space for the delete button */
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center p-4">
+    <canvas id="fireworks-canvas"></canvas>
+
+    <h1 id="main-title" class="text-4xl font-bold mb-2 text-blue-400">Kanban Board</h1>
+    <div class="w-full max-w-5xl flex flex-col md:flex-row justify-center items-start md:items-stretch flex-wrap">
+        <div class="kanban-column flex-grow-0 md:flex-grow w-full md:w-auto">
+            <h2 class="text-2xl font-semibold mb-4 text-center text-blue-300">Añadir Tarea</h2>
+            <input type="text" id="new-task-input" class="add-task-input" placeholder="Escribe una nueva tarea y presiona Enter">
+            <div id="todo-column" class="flex-grow overflow-y-auto">
+                </div>
+        </div>
+
+        <div id="in-progress-column" class="kanban-column flex-grow-0 md:flex-grow w-full md:w-auto">
+            <h2 class="text-2xl font-semibold mb-4 text-center text-yellow-300">En Progreso</h2>
+            <div class="flex-grow overflow-y-auto">
+                </div>
+        </div>
+
+        <div id="done-column" class="kanban-column flex-grow-0 md:flex-grow w-full md:w-auto">
+            <h2 class="text-2xl font-semibold mb-4 text-center text-green-300">Hecho</h2>
+            <div class="flex-grow overflow-y-auto">
+                </div>
+        </div>
+    </div>
+
+    <button id="clear-all-button" class="clear-all-button mt-8">
+        <i class="fas fa-trash-alt"></i> Limpiar Todas las Tareas
+    </button>
+
+    <script>
+        // Ensure the entire script runs after the DOM is fully loaded
+        window.onload = function() {
+            const newTaskInput = document.getElementById('new-task-input');
+            const todoColumn = document.getElementById('todo-column');
+            const inProgressColumn = document.getElementById('in-progress-column');
+            const doneColumn = document.getElementById('done-column');
+            const clearAllButton = document.getElementById('clear-all-button');
+            const mainTitle = document.getElementById('main-title'); // Get the main title
+            const columnTitles = document.querySelectorAll('.kanban-column h2'); // Get all column titles
+
+            const fireworksCanvas = document.getElementById('fireworks-canvas');
+            const ctx = fireworksCanvas.getContext('2d');
+
+            let tasks = [];
+            let draggedTask = null;
+            let animationFrameId = null;
+
+            // Define color palettes
+            const colorPalettes = [
+                {
+                    bodyBg: '#1a202c', bodyText: '#e2e8f0', columnBg: '#2d3748', taskCardBg: '#4a5568',
+                    titleColor: '#63b3ed', todoTitle: '#63b3ed', inProgressTitle: '#f6ad55', doneTitle: '#68d391',
+                    deleteButton: '#cbd5e0', deleteButtonHover: '#e53e3e', clearAllButtonBg: '#e53e3e', clearAllButtonHoverBg: '#c53030',
+                    inputBorder: '#4a5568', inputBg: '#2d3748', inputText: '#e2e8f0', inputPlaceholder: '#a0aec0', inputFocus: '#63b3ed'
+                },
+                {
+                    bodyBg: '#2a2a2a', bodyText: '#f0f0f0', columnBg: '#3c3c3c', taskCardBg: '#5a5a5a',
+                    titleColor: '#a0e060', todoTitle: '#a0e060', inProgressTitle: '#e0a060', doneTitle: '#60e0e0',
+                    deleteButton: '#cccccc', deleteButtonHover: '#ff4444', clearAllButtonBg: '#ff4444', clearAllButtonHoverBg: '#cc3333',
+                    inputBorder: '#5a5a5a', inputBg: '#3c3c3c', inputText: '#f0f0f0', inputPlaceholder: '#a0a0a0', inputFocus: '#a0e060'
+                },
+                {
+                    bodyBg: '#0f172a', bodyText: '#f8fafc', columnBg: '#1e293b', taskCardBg: '#334155',
+                    titleColor: '#cbd5e0', todoTitle: '#cbd5e0', inProgressTitle: '#fbbf24', doneTitle: '#34d399',
+                    deleteButton: '#94a3b8', deleteButtonHover: '#ef4444', clearAllButtonBg: '#ef4444', clearAllButtonHoverBg: '#dc2626',
+                    inputBorder: '#334155', inputBg: '#1e293b', inputText: '#f8fafc', inputPlaceholder: '#64748b', inputFocus: '#60a5fa'
+                },
+                {
+                    bodyBg: '#282c34', bodyText: '#e0e0e0', columnBg: '#3e4451', taskCardBg: '#5c6370',
+                    titleColor: '#56b6c2', todoTitle: '#56b6c2', inProgressTitle: '#e5c07b', doneTitle: '#98c379',
+                    deleteButton: '#abb2bf', deleteButtonHover: '#e06c75', clearAllButtonBg: '#e06c75', clearAllButtonHoverBg: '#d64653',
+                    inputBorder: '#5c6370', inputBg: '#3e4451', inputText: '#e0e0e0', inputPlaceholder: '#abb2bf', inputFocus: '#56b6c2'
+                }
+            ];
+
+            function applyColorPalette(palette) {
+                document.body.style.backgroundColor = palette.bodyBg;
+                document.body.style.color = palette.bodyText;
+                mainTitle.style.color = palette.titleColor; // Apply to main title
+
+                document.querySelectorAll('.kanban-column').forEach(col => {
+                    col.style.backgroundColor = palette.columnBg;
+                });
+
+                document.querySelectorAll('.task-card').forEach(card => {
+                    card.style.backgroundColor = palette.taskCardBg;
+                    card.querySelector('.task-content-wrapper span').style.color = palette.bodyText; // Task text
+                    card.querySelector('.text-xs').style.color = palette.bodyText; // Duration text
+                });
+
+                columnTitles[0].style.color = palette.todoTitle;
+                columnTitles[1].style.color = palette.inProgressTitle;
+                columnTitles[2].style.color = palette.doneTitle;
+
+                // Update input styles
+                newTaskInput.style.borderColor = palette.inputBorder;
+                newTaskInput.style.backgroundColor = palette.inputBg;
+                newTaskInput.style.color = palette.inputText;
+                newTaskInput.style.setProperty('--tw-placeholder-color', palette.inputPlaceholder); // Tailwind placeholder color
+
+                // Update delete button and clear all button
+                document.querySelectorAll('.delete-button').forEach(btn => {
+                    btn.style.color = palette.deleteButton;
+                    btn.onmouseover = () => btn.style.color = palette.deleteButtonHover;
+                    btn.onmouseout = () => btn.style.color = palette.deleteButton;
+                });
+                clearAllButton.style.backgroundColor = palette.clearAllButtonBg;
+                clearAllButton.onmouseover = () => clearAllButton.style.backgroundColor = palette.clearAllButtonHoverBg;
+                clearAllButton.onmouseout = () => clearAllButton.style.backgroundColor = palette.clearAllButtonBg;
+            }
+
+            // Fireworks animation setup
+            let particles = [];
+            const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#00FFFF', '#FF00FF', '#FFA500', '#800080'];
+
+            function resizeCanvas() {
+                fireworksCanvas.width = window.innerWidth;
+                fireworksCanvas.height = window.innerHeight;
+            }
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            function createFirework(x, y) {
+                const hue = Math.random() * 360;
+                const count = 100;
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 5 + 1;
+                    particles.push({
+                        x: x,
+                        y: y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        alpha: 1,
+                        gravity: 0.05,
+                        friction: 0.99,
+                        color: colors[Math.floor(Math.random() * colors.length)]
+                    });
+                }
+            }
+
+            function updateFireworks() {
+                ctx.clearRect(0, 0, fireworksCanvas.width, fireworksCanvas.height);
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.vx *= p.friction;
+                    p.vy *= p.friction;
+                    p.vy += p.gravity;
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.alpha -= 0.01;
+
+                    if (p.alpha <= 0.01) {
+                        particles.splice(i, 1);
+                        continue;
+                    }
+
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = p.alpha;
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                if (particles.length > 0) {
+                    animationFrameId = requestAnimationFrame(updateFireworks);
+                } else {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
+            }
+
+            function triggerFireworks() {
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                }
+                particles = [];
+                const x = fireworksCanvas.width / 2;
+                const y = fireworksCanvas.height / 2;
+                createFirework(x, y);
+                animationFrameId = requestAnimationFrame(updateFireworks);
+            }
+
+            // Helper to format duration
+            function formatDuration(milliseconds) {
+                const seconds = Math.floor(milliseconds / 1000);
+                const minutes = Math.floor(seconds / 60);
+                const hours = Math.floor(minutes / 60);
+                const days = Math.floor(hours / 24);
+
+                let parts = [];
+                if (days > 0) parts.push(`${days} día${days > 1 ? 's' : ''}`);
+                if (hours % 24 > 0) parts.push(`${hours % 24} hora${hours % 24 > 1 ? 's' : ''}`);
+                if (minutes % 60 > 0) parts.push(`${minutes % 60} minuto${minutes % 60 > 1 ? 's' : ''}`);
+                if (seconds % 60 > 0 || parts.length === 0) parts.push(`${seconds % 60} segundo${seconds % 60 > 1 ? 's' : ''}`);
+
+                return parts.join(', ');
+            }
+
+            function saveTasks() {
+                localStorage.setItem('kanbanTasks', JSON.stringify(tasks));
+            }
+
+            function loadTasks() {
+                const storedTasks = localStorage.getItem('kanbanTasks');
+                if (storedTasks) {
+                    tasks = JSON.parse(storedTasks);
+                    tasks.forEach(task => {
+                        if (task.createdAt) task.createdAt = new Date(task.createdAt).getTime();
+                        if (task.movedFromTodoAt) task.movedFromTodoAt = new Date(task.movedFromTodoAt).getTime();
+                        if (task.movedToDoneAt) task.movedToDoneAt = new Date(task.movedToDoneAt).getTime();
+                        if (task.completedAt) task.completedAt = new Date(task.completedAt).getTime();
+                        if (task.duration) task.duration = task.duration;
+                        createTaskCard(task);
+                    });
+                }
+                applyColorPalette(colorPalettes[0]); // Apply initial palette on load
+            }
+
+            function createTaskCard(task) {
+                const card = document.createElement('div');
+                card.className = 'task-card';
+                card.setAttribute('draggable', 'true');
+                card.dataset.id = task.id;
+
+                const contentWrapper = document.createElement('div');
+                contentWrapper.className = 'task-content-wrapper';
+
+                const taskText = document.createElement('span');
+                taskText.textContent = task.content;
+                taskText.className = 'text-base font-medium mb-1';
+                // Apply current body text color to task text
+                taskText.style.color = document.body.style.color;
+
+
+                const durationDisplay = document.createElement('span');
+                durationDisplay.className = 'text-xs text-gray-400';
+                if (task.column === 'done' && task.duration) {
+                    durationDisplay.textContent = `Duración: ${formatDuration(task.duration)}`;
+                } else {
+                    durationDisplay.textContent = '';
+                }
+                // Apply current body text color to duration text
+                durationDisplay.style.color = document.body.style.color;
+
+                contentWrapper.appendChild(taskText);
+                contentWrapper.appendChild(durationDisplay);
+
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'delete-button';
+                deleteButton.innerHTML = '<i class="fas fa-times-circle"></i>';
+                deleteButton.onclick = (e) => {
+                    e.stopPropagation();
+                    deleteTask(task.id);
+                };
+                // Set initial delete button color and hover
+                const currentPalette = colorPalettes[currentPaletteIndex];
+                deleteButton.style.color = currentPalette.deleteButton;
+                deleteButton.onmouseover = () => deleteButton.style.color = currentPalette.deleteButtonHover;
+                deleteButton.onmouseout = () => deleteButton.style.color = currentPalette.deleteButton;
+
+
+                card.appendChild(contentWrapper);
+                card.appendChild(deleteButton);
+
+                if (task.column === 'todo') {
+                    todoColumn.appendChild(card);
+                } else if (task.column === 'in-progress') {
+                    inProgressColumn.querySelector('div').appendChild(card);
+                } else if (task.column === 'done') {
+                    doneColumn.querySelector('div').appendChild(card);
+                }
+
+                card.addEventListener('dragstart', handleDragStart);
+                card.addEventListener('dragend', handleDragEnd);
+            }
+
+            function addTask(content) {
+                if (!content.trim()) return;
+
+                const newTask = {
+                    id: Date.now().toString(),
+                    content: content.trim(),
+                    column: 'todo',
+                    createdAt: Date.now(),
+                    movedFromTodoAt: null,
+                    movedToDoneAt: null,
+                    completedAt: null,
+                    duration: null
+                };
+                tasks.push(newTask);
+                createTaskCard(newTask);
+                saveTasks();
+                newTaskInput.value = '';
+            }
+
+            function deleteTask(id) {
+                tasks = tasks.filter(task => task.id !== id);
+                const cardToRemove = document.querySelector(`.task-card[data-id="${id}"]`);
+                if (cardToRemove) {
+                    cardToRemove.remove();
+                }
+                saveTasks();
+            }
+
+            function updateTaskColumn(taskId, newColumn) {
+                const taskIndex = tasks.findIndex(task => task.id === taskId);
+                if (taskIndex > -1) {
+                    const oldColumn = tasks[taskIndex].column;
+                    tasks[taskIndex].column = newColumn;
+
+                    if (oldColumn === 'todo' && newColumn !== 'todo' && tasks[taskIndex].movedFromTodoAt === null) {
+                        tasks[taskIndex].movedFromTodoAt = Date.now();
+                    }
+                    if (newColumn === 'todo') {
+                        tasks[taskIndex].movedFromTodoAt = null;
+                        tasks[taskIndex].movedToDoneAt = null;
+                        tasks[taskIndex].completedAt = null;
+                        tasks[taskIndex].duration = null;
+                    }
+
+                    if (newColumn === 'done' && oldColumn !== 'done') {
+                        tasks[taskIndex].movedToDoneAt = Date.now();
+                        tasks[taskIndex].completedAt = Date.now();
+                        if (tasks[taskIndex].movedFromTodoAt) {
+                            tasks[taskIndex].duration = tasks[taskIndex].completedAt - tasks[taskIndex].movedFromTodoAt;
+                        }
+                        triggerFireworks();
+                    } else if (oldColumn === 'done' && newColumn !== 'done') {
+                        tasks[taskIndex].movedToDoneAt = null;
+                        tasks[taskIndex].completedAt = null;
+                        tasks[taskIndex].duration = null;
+                    }
+
+                    const cardElement = document.querySelector(`.task-card[data-id="${taskId}"]`);
+                    if (cardElement) {
+                        const durationSpan = cardElement.querySelector('.task-content-wrapper .text-xs');
+                        if (durationSpan) {
+                            if (tasks[taskIndex].column === 'done' && tasks[taskIndex].duration) {
+                                durationSpan.textContent = `Duración: ${formatDuration(tasks[taskIndex].duration)}`;
+                            } else {
+                                durationSpan.textContent = '';
+                            }
+                        }
+                    }
+                    saveTasks();
+                }
+            }
+
+            function handleDragStart(e) {
+                draggedTask = e.target;
+                e.dataTransfer.setData('text/plain', e.target.dataset.id);
+                setTimeout(() => {
+                    draggedTask.classList.add('dragging');
+                }, 0);
+            }
+
+            function handleDragEnd() {
+                draggedTask.classList.remove('dragging');
+                draggedTask = null;
+                document.querySelectorAll('.kanban-column').forEach(col => {
+                    col.classList.remove('drag-over');
+                });
+            }
+
+            function handleDragOver(e) {
+                e.preventDefault();
+                const targetColumn = e.currentTarget;
+                if (targetColumn.id === 'todo-column' && draggedTask && draggedTask.parentNode.id === 'todo-column') {
+                    return;
+                }
+                targetColumn.classList.add('drag-over');
+            }
+
+            function handleDragLeave(e) {
+                e.currentTarget.classList.remove('drag-over');
+            }
+
+            function handleDrop(e) {
+                e.preventDefault();
+                const taskId = e.dataTransfer.getData('text/plain');
+                const droppedOnContainer = e.currentTarget;
+                const taskCard = document.querySelector(`.task-card[data-id="${taskId}"]`);
+
+                if (taskCard) {
+                    const currentColumnElement = taskCard.closest('.kanban-column');
+                    const currentColumnId = currentColumnElement ? currentColumnElement.id : null;
+
+                    let newColumnId;
+                    if (droppedOnContainer.id === 'todo-column') {
+                        newColumnId = 'todo';
+                    } else {
+                        newColumnId = droppedOnContainer.closest('.kanban-column').id === 'in-progress-column' ? 'in-progress' : 'done';
+                    }
+
+                    if (newColumnId === 'todo' && currentColumnId !== 'todo-column') {
+                        droppedOnContainer.appendChild(taskCard);
+                        updateTaskColumn(taskId, 'todo');
+                    } else if (newColumnId === 'todo' && currentColumnId === 'todo-column') {
+                        return;
+                    } else {
+                        const afterElement = getDragAfterElement(droppedOnContainer, e.clientY);
+                        if (afterElement == null) {
+                            droppedOnContainer.appendChild(taskCard);
+                        } else {
+                            droppedOnContainer.insertBefore(taskCard, afterElement);
+                        }
+                        updateTaskColumn(taskId, newColumnId);
+                    }
+                }
+                droppedOnContainer.classList.remove('drag-over');
+            }
+
+            function getDragAfterElement(container, y) {
+                if (!container) return null;
+                const draggableElements = [...container.querySelectorAll('.task-card:not(.dragging)')];
+                return draggableElements.reduce((closest, child) => {
+                    const box = child.getBoundingClientRect();
+                    const offset = y - box.top - box.height / 2;
+                    if (offset < 0 && offset > closest.offset) {
+                        return { offset: offset, element: child };
+                    } else {
+                        return closest;
+                    }
+                }, { offset: Number.NEGATIVE_INFINITY }).element;
+            }
+
+            // Keep track of the current palette index
+            let currentPaletteIndex = 0;
+
+            // Event Listeners
+            newTaskInput.addEventListener('keyup', (e) => {
+                if (e.key === 'Enter') {
+                    addTask(newTaskInput.value);
+                }
+            });
+
+            clearAllButton.addEventListener('click', () => {
+                if (confirm('¿Estás seguro de que quieres eliminar todas las tareas?')) {
+                    localStorage.removeItem('kanbanTasks');
+                    tasks = [];
+                    todoColumn.innerHTML = '';
+                    inProgressColumn.querySelector('div').innerHTML = '';
+                    doneColumn.querySelector('div').innerHTML = '';
+
+                    // Change color palette
+                    currentPaletteIndex = (currentPaletteIndex + 1) % colorPalettes.length;
+                    applyColorPalette(colorPalettes[currentPaletteIndex]);
+                }
+            });
+
+            // Add drag/drop listeners to columns
+            [todoColumn, inProgressColumn.querySelector('div'), doneColumn.querySelector('div')].forEach(col => {
+                col.addEventListener('dragover', handleDragOver);
+                col.addEventListener('dragleave', handleDragLeave);
+                col.addEventListener('drop', handleDrop);
+            });
+
+            // Initial load
+            loadTasks();
+        }; // Closes window.onload
+    </script>
+</body>
+</html>
